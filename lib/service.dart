@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:expense_tracker/expense_model.dart';
+import 'package:expense_tracker/model/expense_model.dart';
 
 class FirestoreService {
   final CollectionReference _expensesCollection =
