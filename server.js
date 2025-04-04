@@ -13,15 +13,17 @@ app.use(express.json());
 app.use(cors());
 
 // MongoDB Connection
-const MONGO_URI = process.env.MONGO_URI
+const MONGO_URI = process.env.MONGO_URI;
 mongoose.connect(MONGO_URI)
   .then(() => console.log("MongoDB Connected"))
   .catch(err => console.error("MongoDB Connection Error:", err));
 
 // API Routes
+
+// Add Expense
 app.post('/addExpense', async (req, res) => {
   console.log("Received Data:", req.body);
-  const { amount, category, date } = req.body;
+  const { amount, category, subcategory, date } = req.body; // Include subcategory
 
   if (!amount || !category || !date) {
     return res.status(400).json({ error: "Missing required fields" });
@@ -31,6 +33,7 @@ app.post('/addExpense', async (req, res) => {
     const newExpense = new Expense({
       amount,
       category,
+      subcategory, // Save subcategory if provided
       date: new Date(date),
     });
     await newExpense.save();
@@ -42,6 +45,7 @@ app.post('/addExpense', async (req, res) => {
   }
 });
 
+// Get All Expenses
 app.get('/expenses', async (req, res) => {
   try {
     const expenses = await Expense.find();
@@ -52,11 +56,25 @@ app.get('/expenses', async (req, res) => {
   }
 });
 
+// Get Summary
 app.get('/summary', async (req, res) => {
   try {
     console.log("Fetching summary...");
     const summary = await Expense.aggregate([
-      { $group: { _id: "$category", total: { $sum: "$amount" } } }
+      {
+        $group: {
+          _id: { category: "$category", subcategory: "$subcategory" }, // Group by category and subcategory
+          total: { $sum: "$amount" },
+        },
+      },
+      {
+        $project: {
+          _id: 0, // Exclude the `_id` field
+          category: "$_id.category", // Flatten `category`
+          subcategory: "$_id.subcategory", // Flatten `subcategory`
+          total: 1, // Include the `total` field
+        },
+      },
     ]);
     console.log("Summary fetched:", summary);
     res.json(summary);
@@ -74,5 +92,25 @@ app.listen(PORT, () => {
     console.error(`Port ${PORT} is already in use. Please use a different port.`);
   } else {
     console.error('Server error:', err);
+  }
+});
+
+// Delete
+app.delete('/deleteExpense/:id', async (req, res) => {
+  console.log("hey");
+  try {
+    const expenseId = req.params.id;
+    console.log(expenseId)
+    const result = await Expense.findByIdAndDelete(expenseId);
+    console.log(result)
+
+    if (!result) {
+      return res.status(404).json({ error: "Expense not found" });
+    }
+
+    res.status(200).json({ message: "Expense deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting expense:", err);
+    res.status(500).json({ error: "Failed to delete expense" });
   }
 });
