@@ -1,3 +1,4 @@
+import 'package:expense_tracker/bottom_navigation.dart';
 import 'package:expense_tracker/screen/expense_screen.dart';
 import 'package:expense_tracker/screen/login_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -33,7 +34,7 @@ class MyApp extends StatelessWidget {
               
             }
             if (snapshot.hasData) {
-              return ExpenseScreen();
+              return BottomNavigation();
             }
             return LoginScreen();
           }),
