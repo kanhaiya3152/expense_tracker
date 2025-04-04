@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:expense_tracker/api_service.dart';
 import 'package:expense_tracker/model/expense_model.dart';
+import 'package:expense_tracker/screen/login_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
@@ -34,70 +35,141 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
     'Other': Icons.category,
   };
 
-  Map<String, double> _summaryData = {};
   final userId = FirebaseAuth.instance.currentUser!;
-
-  @override
-  void initState() {
-    super.initState();
-    _fetchSummary(); // Fetch summary from MongoDB
-  }
-
-  // Fetch summary data from MongoDB
-  Future<void> _fetchSummary() async {
-    try {
-      Map<String, double> summary = await ApiService().getExpenseSummary();
-      print("Fetched Summary: $summary"); // Log the summary data
-      setState(() {
-        _summaryData = summary;
-      });
-    } catch (e) {
-      print("Error fetching summary: $e");
-    }
-  }
 
   // Add expense to Firestore
   void _addExpense() async {
-    if (_amountController.text.isEmpty) return;
+  if (_amountController.text.isEmpty) return;
 
+  try {
+    double amount = double.tryParse(_amountController.text) ?? 0;
+    if (amount <= 0) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text("Enter a valid amount")));
+      return;
+    }
+
+    String? subcategory =
+        _selectedCategory == 'Food' ? _selectedSubcategory : null;
+
+    Expense expense = Expense(
+      amount: amount,
+      category: _selectedCategory,
+      subcategory: subcategory,
+      date: DateTime.now(),
+    );
+
+    print("Adding Expense: ${expense.toJson()}");
+
+    // Add expense to MongoDB and get the MongoDB ID
+    final mongoId = await ApiService().addExpense(expense.toJson());
+
+    // Add expense to Firestore with the MongoDB ID
+    await _firestore
+        .collection('users')
+        .doc(userId.uid)
+        .collection('expenses')
+        .add({
+      ...expense.toJson(),
+      '_id': mongoId, // Include the MongoDB ID in Firestore
+    });
+
+    _amountController.clear();
+    setState(() {
+      _selectedSubcategory = null;
+    });
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text("Expense added successfully")));
+  } catch (e) {
+    print("Error adding expense: $e");
+  }
+}
+
+  void _showDeleteConfirmation(String docId, String? mongoId) {
+    if (mongoId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Unable to delete: MongoDB ID is missing")));
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Delete Expense'),
+          content: Text('Are you sure you want to delete this expense?'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(); // Close the dialog
+              },
+              child: Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(); // Close the dialog
+                _deleteExpense(docId, mongoId); // Delete the expense
+              },
+              child: Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _deleteExpense(String docId, String mongoId) async {
     try {
-      double amount = double.tryParse(_amountController.text) ?? 0;
-      if (amount <= 0) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text("Enter a valid amount")));
-        return;
-      }
-
-      // Include subcategory only if the category is "Food"
-      String? subcategory = _selectedCategory == 'Food' ? _selectedSubcategory : null;
-
-      Expense expense = Expense(
-        amount: amount,
-        category: _selectedCategory,
-        subcategory: subcategory, // Add subcategory to the expense
-        date: DateTime.now(),
-      );
-
-      print("Adding Expense: ${expense.toJson()}"); // Log the expense data
-
-      // Call the ApiService to add the expense to MongoDB
-      await ApiService().addExpense(expense.toJson());
-
+      print("Deleting expense with Firestore ID: $docId and MongoDB ID: $mongoId");
+      // Delete from Firebase
       await _firestore
           .collection('users')
           .doc(userId.uid)
           .collection('expenses')
-          .add(expense.toJson());
+          .doc(docId)
+          .delete();
 
-      _amountController.clear();
-      setState(() {
-        _selectedSubcategory = null; // Reset subcategory after adding
-      }); // Refresh UI after adding
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text("Expense added successfully")));
+      // Delete from MongoDB
+      await ApiService().deleteExpense(mongoId);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Expense deleted successfully")));
     } catch (e) {
-      print("Error adding expense: $e");
+      print("Error deleting expense: $e");
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text("Failed to delete expense")));
     }
+  }
+
+  void _logout() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Logout'),
+          content: Text('Are you sure you want to logout?'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: const Text('No'),
+            ),
+            TextButton(
+              onPressed: () {
+                FirebaseAuth.instance.signOut();
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(
+                    builder: (ctx) => const LoginScreen(),
+                  ),
+                );
+              },
+              child: const Text('Yes'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -106,7 +178,15 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
       appBar: AppBar(
         title: Text('Expense Tracker'),
         backgroundColor: Color.fromARGB(255, 141, 127, 127),
-        centerTitle: true,
+        centerTitle: false,
+        actions: [
+          IconButton(
+              onPressed: _logout,
+              icon: Icon(
+                Icons.logout,
+                color: Colors.black,
+              ))
+        ],
       ),
       body: Padding(
         padding: EdgeInsets.all(16.0),
@@ -138,7 +218,8 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
                   onChanged: (newValue) {
                     setState(() {
                       _selectedCategory = newValue!;
-                      _selectedSubcategory = null; // Reset subcategory when category changes
+                      _selectedSubcategory =
+                          null; // Reset subcategory when category changes
                     });
                   },
                   items: _categories.map((category) {
@@ -179,7 +260,8 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
                     items: _foodSubcategories.map((subcategory) {
                       return DropdownMenuItem(
                         value: subcategory,
-                        child: Text(subcategory, style: TextStyle(fontSize: 16)),
+                        child:
+                            Text(subcategory, style: TextStyle(fontSize: 16)),
                       );
                     }).toList(),
                     icon: Icon(Icons.arrow_drop_down, color: Colors.black54),
@@ -198,26 +280,6 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
               ),
             ),
             SizedBox(height: 20),
-            Divider(),
-
-            // Display Expense Summary from MongoDB
-            Text(
-              'Expense Summary ',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            _summaryData.isEmpty
-                ? Text('No summary data available')
-                : Column(
-                    children: _summaryData.entries.map((entry) {
-                      return ListTile(
-                        leading: Icon(
-                            _categoryIcons[entry.key] ?? Icons.category,
-                            color: Colors.black45),
-                        title: Text(
-                            '${entry.key}: \$${entry.value.toStringAsFixed(2)}'),
-                      );
-                    }).toList(),
-                  ),
             Divider(),
 
             // Display Expenses from Firestore
@@ -249,6 +311,12 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
                     Map<String, dynamic> data =
                         doc.data() as Map<String, dynamic>;
                     Expense expense = Expense.fromJson(data);
+
+                    String displayTitle =
+                        expense.subcategory ?? expense.category;
+                    String? mongoId =
+                        data['_id']; // Retrieve the MongoDB ID from Firestore
+
                     return Card(
                       color: Color.fromARGB(189, 211, 190, 190),
                       elevation: 3,
@@ -260,11 +328,14 @@ class _ExpenseScreenState extends State<ExpenseScreen> {
                           color: Colors.black45,
                         ),
                         title: Text(
-                          '${expense.category}: \$${expense.amount.toStringAsFixed(2)}',
+                          '$displayTitle: ₹${expense.amount.toStringAsFixed(2)}',
                           style: TextStyle(fontWeight: FontWeight.bold),
                         ),
                         subtitle: Text(expense.date.toString(),
                             style: TextStyle(color: Colors.grey[800])),
+                        onTap: () {
+                          _showDeleteConfirmation(doc.id, mongoId);
+                        },
                       ),
                     );
                   }).toList(),
